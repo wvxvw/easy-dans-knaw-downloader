@@ -45,98 +45,92 @@ parser.add_argument(
     Logging verbosity level. Default 30 (WARNING).
     ''',
 )
-
-
-def tx_to_url(tx):
-    return 'https://www.blockchain.com/btc/tx/{}'.format(tx)
+parser.add_argument(
+    '-d',
+    '--dataset',
+    help='''
+    Dataset id to download (appears in the URL of the site):
+    Example: 
+    https://easy.dans.knaw.nl/ui/datasets/id/easy-dataset:112935
+    112935 is the id.
+    ''',
+)
 
 
 class WebDriverProcess(Process):
 
-    def __init__(self, node, sink, jobs, is_done, timeout=1):
+    def __init__(
+            self,
+            node,
+            sink,
+            jobs,
+            is_done,
+            out_dir,
+            url,
+            timeout=1,
+    ):
         super().__init__()
         self.node = node
+        self.node_url = 'http://{}:5555/wd/hub'.format(node)
         self.sink = sink
         self.jobs = jobs
-        self.is_done = is_done
+        self.out_dir = out_dir
+        self.url = url
         self.timeout = timeout
 
     def run(self):
+        options = webdriver.ChromeOptions()
+        prefs = {'download.default_directory': self.out_dir}
+        options.add_experimental_option('prefs', prefs)
         self.driver = webdriver.Remote(
-            command_executor=self.node,
+            command_executor=self.node_url,
             desired_capabilities=DesiredCapabilities.CHROME,
+            chrome_options=options,
         )
+        self.driver.get(self.url)
         self.driver.maximize_window()
-        while not self.is_done.is_set():
+        while True:
             try:
                 tx = self.jobs.get_nowait()
-                self.process_url(tx_to_url(tx))
+                self.process_item(tx)
             except queue.Empty:
                 time.sleep(self.timeout)
 
-    def process_url(self, url):
-        logging.info('Processing: {}'.format(url))
-        src_tx = url.split('/')[-1]
-        self.driver.get(url)
-        txs = self.find_all_transactions()
-        logging.info('Found {} transactions'.format(len(txs)))
-        if not txs:
-            self.sink.put((src_tx, 'coinbase'))
-        else:
-            for tx in txs:
-                self.sink.put((src_tx, tx))
+    def process_item(self, item):
+        logging.info('Processing: {}'.format(item))
+        response = self.download_item(item)
+        logging.info('Downloaded {}'.format(item))
+        self.sink.put((item, self.node, response))
 
-    def find_all_transactions(self):
-        extras_path = (
-            '/html/body/div[1]/div[3]/div/div[3]/div/div[3]/'
-            'div[2]/div[1]/div[2]/div/div[2]/a'
-        )
-        while True:
-            expand = self.driver.find_elements_by_xpath(extras_path)
-            if expand:
-                message = expand[0].text
-                remaining = int(message.split()[-2][1:])
-                logging.info('Expanding: {}'.format(message))
-                elt = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable(
-                        (By.XPATH, extras_path),
-                    ))
-                actions = ActionChains(self.driver)
-                desired_y = (elt.size['height'] / 2) + elt.location['y']
-                middle = self.driver.execute_script('return window.innerHeight') / 2
-                current_y = middle + self.driver.execute_script('return window.pageYOffset')
-                scroll_y_by = desired_y - current_y
-                self.driver.execute_script('window.scrollBy(0, arguments[0]);', scroll_y_by)
-                actions.click(elt).perform()
-                remaining -= 10
-                if remaining > 0:
-                    WebDriverWait(self.driver, 10).until(
-                        EC.text_to_be_present_in_element(
-                            (By.XPATH, extras_path),
-                            'Load more inputs... ({} remaining)'.format(remaining),
-                        ))
-            else:
-                break
-        tx_path = (
-            '//*[@id="__next"]/div[3]/div/div[3]/div/div[3]/'
-            'div[2]/div[1]/div[2]/div/div[1]/div/div/a'
-        )
-        return [
-            a.get_attribute('href').split('/')[-1]
-            for a in self.driver.find_elements_by_xpath(tx_path)
-        ]
-
-
-def all_paths_found(paths):
-    return all(paths.values())
-
-
-def update_path(paths, src_tx, tx):
-    paths[src_tx] = tx
-    if tx not in paths:
-        paths[tx] = None
-        return True
-    return False
+    def download_item(self):
+        return None
+        # extras_path = (
+        #     '/html/body/div[1]/div[3]/div/div[3]/div/div[3]/'
+        #     'div[2]/div[1]/div[2]/div/div[2]/a'
+        # )
+        # expand = self.driver.find_elements_by_xpath(extras_path)
+        # if expand:
+        #     message = expand[0].text
+        #     remaining = int(message.split()[-2][1:])
+        #     logging.info('Expanding: {}'.format(message))
+        #     elt = WebDriverWait(self.driver, 10).until(
+        #         EC.element_to_be_clickable(
+        #             (By.XPATH, extras_path),
+        #         ))
+        #     actions = ActionChains(self.driver)
+        #     desired_y = (elt.size['height'] / 2) + elt.location['y']
+        #     middle = self.driver.execute_script('return window.innerHeight') / 2
+        #     current_y = middle + self.driver.execute_script('return window.pageYOffset')
+        #     scroll_y_by = desired_y - current_y
+        #     self.driver.execute_script('window.scrollBy(0, arguments[0]);', scroll_y_by)
+        #     actions.click(elt).perform()
+        #     remaining -= 10
+        #     if remaining > 0:
+        #         WebDriverWait(self.driver, 10).until(
+        #             EC.text_to_be_present_in_element(
+        #                 (By.XPATH, extras_path),
+        #                 'Load more inputs... ({} remaining)'.format(remaining),
+        #             ))
 
 
 def scrap(argsv):
@@ -149,43 +143,42 @@ def scrap(argsv):
 
     sink = Queue()
     jobs = Queue()
-    is_done = Event()
-    workers = [
-        WebDriverProcess(
-            'http://{}:5555/wd/hub'.format(node),
+    workers = {
+        node: WebDriverProcess(
+            node,
             sink,
             jobs,
-            is_done,
+            (
+                'https://easy.dans.knaw.nl/ui/datasets/'
+                'id/easy-dataset:{}/tab/2'.format(pargs.dataset)
+            ),
+            pargs.output,
         )
         for node in pargs.node
-    ]
+    }
 
-    for worker in workers:
+    for worker in workers.values():
         worker.start()
 
     try:
-        paths = {pargs.transaction: None}
-        jobs.put_nowait(pargs.transaction)
-        
-        while not all_paths_found(paths):
-            try:
-                src_tx, tx = sink.get()
+        dfile = 0
+        jobs.put_nowait(dfile)
 
-                if update_path(paths, src_tx, tx):
-                    if tx != 'coinbase':
-                        jobs.put_nowait(tx)
+        while workers:
+            try:
+                item, node, response = sink.get()
+
+                if not response:
+                    workers[node].terminate()
+                    del workers[node]
+                else:
+                    jobs.put_nowait(dfile)
             except queue.Empty:
                 time.sleep(1)
 
-        is_done.set()
-        
-        if not pargs.output:
-            print(json.dumps(paths, indent=4))
-        else:
-            with open(pargs.output, 'w') as f:
-                json.dump(paths, f, indent=4)
+        logging.info('Finished downloading.')
     finally:
-        for worker in workers:
+        for worker in workers.values():
             worker.terminate()
 
 
