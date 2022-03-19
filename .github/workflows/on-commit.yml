@@ -1,0 +1,90 @@
+name: Find Coinbase
+on: [push]
+jobs:
+  Scrap:
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.8
+      options: --network-alias scrapper-host
+    env:
+      SELENIUM_HUB_HOST: hub
+      TEST_HOST: scrapper-host
+    services:
+      hub:
+        image: selenium/hub:3.141.59-gold
+      chrome-0:
+        image: selenium/node-chrome:3.141.59-gold
+        env:
+          HUB_HOST: hub
+          HUB_PORT: 4444
+      chrome-1:
+        image: selenium/node-chrome:3.141.59-gold
+        env:
+          HUB_HOST: hub
+          HUB_PORT: 4444
+      chrome-2:
+        image: selenium/node-chrome:3.141.59-gold
+        env:
+          HUB_HOST: hub
+          HUB_PORT: 4444
+      chrome-3:
+        image: selenium/node-chrome:3.141.59-gold
+        env:
+          HUB_HOST: hub
+          HUB_PORT: 4444
+      chrome-4:
+        image: selenium/node-chrome:3.141.59-gold
+        env:
+          HUB_HOST: hub
+          HUB_PORT: 4444
+      chrome-5:
+        image: selenium/node-chrome:3.141.59-gold
+        env:
+          HUB_HOST: hub
+          HUB_PORT: 4444
+      chrome-6:
+        image: selenium/node-chrome:3.141.59-gold
+        env:
+          HUB_HOST: hub
+          HUB_PORT: 4444
+      chrome-7:
+        image: selenium/node-chrome:3.141.59-gold
+        env:
+          HUB_HOST: hub
+          HUB_PORT: 4444
+      chrome-8:
+        image: selenium/node-chrome:3.141.59-gold
+        env:
+          HUB_HOST: hub
+          HUB_PORT: 4444
+      chrome-9:
+        image: selenium/node-chrome:3.141.59-gold
+        env:
+          HUB_HOST: hub
+          HUB_PORT: 4444
+    steps:
+      - uses: actions/checkout@v2
+      - run: echo "TEST_HOST $TEST_HOST"
+      - run: ping -c 1 chrome-9
+      - run: python3 -m venv .venv
+      - run: .venv/bin/python -m pip install wheel
+      - run: .venv/bin/python setup.py install
+      - run: >
+          .venv/bin/python -m gk8_scrap
+          --transaction 478ed0065aeab602fedba0d1d87dc6c901f7a91a2ba7a7710563cde906ea5846
+          --output coinbase.csv
+          --verbosity 20
+          --node chrome-0
+          --node chrome-1
+          --node chrome-2
+          --node chrome-3
+          --node chrome-4
+          --node chrome-5
+          --node chrome-6
+          --node chrome-7
+          --node chrome-8
+          --node chrome-9
+      - uses: actions/upload-artifact@v2
+        with:
+          name: Coinbase Results
+          path: coinbase.csv
