@@ -4,6 +4,7 @@ import queue
 import time
 import logging
 import json
+import os
 
 from argparse import ArgumentParser
 from multiprocessing import Process, Queue, Event
@@ -14,6 +15,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import TimeoutException
 
 
 # TODO(wvxvw): Also configure logging
@@ -59,16 +61,7 @@ parser.add_argument(
 
 class WebDriverProcess(Process):
 
-    def __init__(
-            self,
-            node,
-            sink,
-            jobs,
-            is_done,
-            out_dir,
-            url,
-            timeout=1,
-    ):
+    def __init__(self, node, sink, jobs, url, out_dir, timeout=1):
         super().__init__()
         self.node = node
         self.node_url = 'http://{}:5555/wd/hub'.format(node)
@@ -77,60 +70,91 @@ class WebDriverProcess(Process):
         self.out_dir = out_dir
         self.url = url
         self.timeout = timeout
+        try:
+            os.makedirs(self.out_dir)
+        except FileExistsError:
+            pass
 
     def run(self):
         options = webdriver.ChromeOptions()
-        prefs = {'download.default_directory': self.out_dir}
+        logging.info(
+            '{} Will store files in {}'.format(self.node, self.out_dir),
+        )
+        prefs = {
+            'download.default_directory': '/home/selenium/downloads',
+            'download.prompt_for_download': False,
+            'download.directory_upgrade': True,
+            'safebrowsing.enabled': True,
+            'profile.default_content_setting_values.automatic_downloads': 2,
+        }
         options.add_experimental_option('prefs', prefs)
         self.driver = webdriver.Remote(
             command_executor=self.node_url,
             desired_capabilities=DesiredCapabilities.CHROME,
-            chrome_options=options,
+            options=options,
         )
+        logging.info('Starting: {}'.format(self.node))
         self.driver.get(self.url)
+        logging.info('{} Visited: {}'.format(self.node, self.url))
         self.driver.maximize_window()
+
+        data_dir = (
+            '/html/body/div/div[2]/div/div[2]/div[2]/div[1]/div/'
+            'div/div/div[2]/div[2]/div[1]/div[1]/div/div/div[2]/'
+            'div[1]/div/span[2]/a'
+        )
+        data_dir_button = self.driver.find_element_by_xpath(data_dir)
+        data_dir_button.click()
+
+        location = (
+            '/html/body/div/div[2]/div/div[2]/div[2]/div[1]/div/'
+            'div/div/div[2]/div[1]/div[2]/ol/li[2]/span'
+        )
+
+        location_ready = WebDriverWait(self.driver, 10).until(
+            EC.presence_of_element_located(
+                (By.XPATH, location),
+            ))
+
         while True:
             try:
                 tx = self.jobs.get_nowait()
-                self.process_item(tx)
+                logging.info('{} Accepted: {}'.format(self.node, tx))
+                if not self.process_item(tx):
+                    break
             except queue.Empty:
                 time.sleep(self.timeout)
 
-    def process_item(self, item):
-        logging.info('Processing: {}'.format(item))
-        response = self.download_item(item)
-        logging.info('Downloaded {}'.format(item))
-        self.sink.put((item, self.node, response))
+    def table_item(self, item):
+        return (
+            '/html/body/div/div[2]/div/div[2]/div[2]/div[1]/div/'
+            'div/div/div[2]/div[2]/div[2]/table/tbody/tr[{}]/td[2]/'
+            'span/a'
+        ).format(item + 1)
 
-    def download_item(self):
-        return None
-        # extras_path = (
-        #     '/html/body/div[1]/div[3]/div/div[3]/div/div[3]/'
-        #     'div[2]/div[1]/div[2]/div/div[2]/a'
-        # )
-        # expand = self.driver.find_elements_by_xpath(extras_path)
-        # if expand:
-        #     message = expand[0].text
-        #     remaining = int(message.split()[-2][1:])
-        #     logging.info('Expanding: {}'.format(message))
-        #     elt = WebDriverWait(self.driver, 10).until(
-        #         EC.element_to_be_clickable(
-        #             (By.XPATH, extras_path),
-        #         ))
-        #     actions = ActionChains(self.driver)
-        #     desired_y = (elt.size['height'] / 2) + elt.location['y']
-        #     middle = self.driver.execute_script('return window.innerHeight') / 2
-        #     current_y = middle + self.driver.execute_script('return window.pageYOffset')
-        #     scroll_y_by = desired_y - current_y
-        #     self.driver.execute_script('window.scrollBy(0, arguments[0]);', scroll_y_by)
-        #     actions.click(elt).perform()
-        #     remaining -= 10
-        #     if remaining > 0:
-        #         WebDriverWait(self.driver, 10).until(
-        #             EC.text_to_be_present_in_element(
-        #                 (By.XPATH, extras_path),
-        #                 'Load more inputs... ({} remaining)'.format(remaining),
-        #             ))
+    def process_item(self, item):
+        logging.info('{} Processing: {}'.format(self.node, item))
+        response = self.download_item(item)
+        logging.info('{} Downloaded {}'.format(self.node, item))
+        self.sink.put((item, self.node, response))
+        return response
+
+    def download_item(self, item):
+        dl_path = self.table_item(item)
+        try:
+            dl_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, dl_path),
+                ))
+            logging.info(
+                '{} Clicking download button: {}'.format(
+                    self.node,
+                    dl_button.text,
+                ))
+            dl_button.click()
+            return True
+        except TimeoutException:
+            return False
 
 
 def scrap(argsv):
@@ -140,6 +164,11 @@ def scrap(argsv):
         force=True,
         level=pargs.verbosity,
     )
+
+    logging.info('Scrapper started')
+    logging.info('Dataset: {}'.format(pargs.dataset))
+    logging.info('Nodes: {}'.format(pargs.node))
+    logging.info('Output: {}'.format(pargs.output))
 
     sink = Queue()
     jobs = Queue()
@@ -160,24 +189,27 @@ def scrap(argsv):
     for worker in workers.values():
         worker.start()
 
+    done = []
+
     try:
-        dfile = 0
-        jobs.put_nowait(dfile)
+        for dfile, worker in enumerate(workers.values()):
+            jobs.put_nowait(dfile)
 
         while workers:
-            try:
-                item, node, response = sink.get()
+            item, node, response = sink.get()
+            logging.info('{} Notified: {} {}'.format(node, item, response))
 
-                if not response:
-                    workers[node].terminate()
-                    del workers[node]
-                else:
-                    jobs.put_nowait(dfile)
-            except queue.Empty:
-                time.sleep(1)
+            if not response:
+                done.append(workers[node])
+                del workers[node]
+            else:
+                dfile += 1
+                jobs.put_nowait(dfile)
 
         logging.info('Finished downloading.')
     finally:
+        for worker in done:
+            worker.terminate()
         for worker in workers.values():
             worker.terminate()
 

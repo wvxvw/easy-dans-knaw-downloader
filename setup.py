@@ -15,6 +15,6 @@ setup(
         'selenium==3.141.0',
     ],
     scripts=[
-        'bin/dowload',
+        'bin/download',
     ],
 )

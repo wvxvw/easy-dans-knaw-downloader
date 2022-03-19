@@ -25,6 +25,7 @@ docker run \
        -e SE_EVENT_BUS_PUBLISH_PORT=4442 \
        -e SE_EVENT_BUS_SUBSCRIBE_PORT=4443 \
        -v /dev/shm:/dev/shm \
+       -v $(pwd)/out:/home/selenium/downloads \
        selenium/node-chrome:3.141.59-gold
 
 docker run \
@@ -38,6 +39,7 @@ docker run \
        -e SE_EVENT_BUS_PUBLISH_PORT=4442 \
        -e SE_EVENT_BUS_SUBSCRIBE_PORT=4443 \
        -v /dev/shm:/dev/shm \
+       -v $(pwd)/out:/home/selenium/downloads \
        selenium/node-chrome:3.141.59-gold
 
 docker run \
@@ -51,6 +53,7 @@ docker run \
        -e SE_EVENT_BUS_PUBLISH_PORT=4442 \
        -e SE_EVENT_BUS_SUBSCRIBE_PORT=4443 \
        -v /dev/shm:/dev/shm \
+       -v $(pwd)/out:/home/selenium/downloads \
        selenium/node-chrome:3.141.59-gold
 
 for c in $(docker ps --filter "label=role=worker" --format "{{.ID}}") ; do

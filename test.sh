@@ -16,4 +16,6 @@ done
 python \
     -m easy_dans_knaw_downloader \
     --output ./out \
+    --dataset 112935 \
+    --verbosity 20 \
     $NODES
