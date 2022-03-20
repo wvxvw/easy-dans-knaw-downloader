@@ -5,9 +5,11 @@ import time
 import logging
 import json
 import os
+import subprocess
 
 from argparse import ArgumentParser
 from multiprocessing import Process, Queue, Event
+from subprocess import Popen
 
 from selenium import webdriver
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
@@ -111,10 +113,18 @@ class WebDriverProcess(Process):
             'div/div/div[2]/div[1]/div[2]/ol/li[2]/span'
         )
 
-        location_ready = WebDriverWait(self.driver, 10).until(
+        WebDriverWait(self.driver, 10).until(
             EC.presence_of_element_located(
                 (By.XPATH, location),
             ))
+        WebDriverWait(self.driver, 10).until(
+            EC.text_to_be_present_in_element(
+                (By.XPATH, location),
+                'Data',
+            ))
+        # It's not really possible to tell if the talbe finished
+        # loading at this point
+        time.sleep(5)
 
         while True:
             try:
@@ -152,6 +162,62 @@ class WebDriverProcess(Process):
                     dl_button.text,
                 ))
             dl_button.click()
+
+            dl_file = os.path.join(self.out_dir, dl_button.text.strip())
+            logging.info(
+                '{} Waiting for download to start: {}'.format(
+                    self.node,
+                    dl_file,
+                ))
+
+            for _ in range(60):
+                if os.path.isfile(dl_file):
+                    logging.info(
+                        '{} Download started: {}'.format(self.node, dl_file),
+                    )
+                    break
+                else:
+                    time.sleep(1)
+            else:
+                logging.error(
+                    '{} Download failed to start: {}'.format(
+                        self.node,
+                        dl_file,
+                    ))
+                return False
+
+            holders = Popen(
+                ('lsof', dl_file),
+                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+            )
+            holders.wait()
+            holders_out = holders.stdout.read().strip()
+            while holders_out:
+                logging.info(
+                    '{} Waiting for download to complete: {}'.format(
+                        self.node,
+                        dl_file,
+                    ))
+                time.sleep(1)
+                holders = Popen(
+                    ('lsof', dl_file),
+                    stderr=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                )
+                holders.wait()
+                holders_out = holders.stdout.read().strip()
+                logging.info(
+                    '{} Waiting for {} to finish'.format(
+                        self.node,
+                        holders_out.decode(),
+                    ))
+
+            logging.info(
+                '{} Download completed: {}'.format(
+                    self.node,
+                    dl_file,
+                ))
             return True
         except TimeoutException:
             return False
