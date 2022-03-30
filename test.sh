@@ -18,4 +18,5 @@ python \
     --output ./out \
     --dataset 112935 \
     --verbosity 20 \
+    --directory History \
     $NODES

@@ -60,10 +60,19 @@ parser.add_argument(
     ''',
 )
 
+parser.add_argument(
+    '-D',
+    '--directory',
+    default='Data',
+    help='''
+    Directory to fetch.
+    ''',
+)
+
 
 class WebDriverProcess(Process):
 
-    def __init__(self, node, sink, jobs, url, out_dir, timeout=1):
+    def __init__(self, node, sink, jobs, url, out_dir, fetch_dir, timeout=1):
         super().__init__()
         self.node = node
         self.node_url = 'http://{}:5555/wd/hub'.format(node)
@@ -71,6 +80,7 @@ class WebDriverProcess(Process):
         self.jobs = jobs
         self.out_dir = out_dir
         self.url = url
+        self.fetch_dir = fetch_dir
         self.timeout = timeout
         try:
             os.makedirs(self.out_dir)
@@ -100,11 +110,20 @@ class WebDriverProcess(Process):
         logging.info('{} Visited: {}'.format(self.node, self.url))
         self.driver.maximize_window()
 
-        data_dir = (
-            '/html/body/div/div[2]/div/div[2]/div[2]/div[1]/div/'
-            'div/div/div[2]/div[2]/div[1]/div[1]/div/div/div[2]/'
-            'div[1]/div/span[2]/a'
-        )
+        # these links seem to have ids, but they also seem unreliable
+        known_directories = {
+            'Data': (
+                '/html/body/div/div[2]/div/div[2]/div[2]/div[1]/div/'
+                'div/div/div[2]/div[2]/div[1]/div[1]/div/div/div[2]/'
+                'div[1]/div/span[2]/a'
+            ),
+            'History': (
+                '/html/body/div/div[2]/div/div[2]/div[2]/div[1]/div/'
+                'div/div/div[2]/div[2]/div[1]/div[1]/div/div/div[2]/'
+                'div[2]/div/span[2]/a'
+            ),
+        }
+        data_dir = known_directories[self.fetch_dir]
         data_dir_button = self.driver.find_element_by_xpath(data_dir)
         data_dir_button.click()
 
@@ -120,7 +139,7 @@ class WebDriverProcess(Process):
         WebDriverWait(self.driver, 10).until(
             EC.text_to_be_present_in_element(
                 (By.XPATH, location),
-                'Data',
+                self.fetch_dir,
             ))
         # It's not really possible to tell if the talbe finished
         # loading at this point
@@ -248,6 +267,7 @@ def scrap(argsv):
                 'id/easy-dataset:{}/tab/2'.format(pargs.dataset)
             ),
             pargs.output,
+            pargs.directory,
         )
         for node in pargs.node
     }
